@@ -49,32 +49,34 @@ def load_scaler():
 @st.cache_data(ttl="15m")
 def load_data():
     """Memuat dan membersihkan data historis Bitcoin."""
+    # Memuat data dasar dari file CSV
     file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
-    df_base = pd.read_csv(file_path, index_col=0)
+    # Pastikan kolom pertama ('Date') digunakan sebagai indeks dan langsung di-parse sebagai tanggal
+    df_base = pd.read_csv(file_path, index_col='Date', parse_dates=True)
     
-    junk_rows_to_drop = ['Ticker', 'Date']
-    for label in junk_rows_to_drop:
-        try: df_base.drop(label, inplace=True)
-        except KeyError: pass
-            
+    # Membersihkan data dari file CSV jika ada nilai non-numerik
     for col in df_base.columns:
         df_base[col] = pd.to_numeric(df_base[col], errors='coerce')
-        
     df_base.dropna(inplace=True)
-    df_base.index = pd.to_datetime(df_base.index)
-    df_base.index.name = 'Date'
     
+    # Mengambil data 10 hari terakhir dari Yahoo Finance untuk memastikan data selalu up-to-date
     latest_data = yf.download("BTC-USD", period="10d", interval="1d")
-    if isinstance(latest_data.columns, pd.MultiIndex):
-        latest_data.columns = latest_data.columns.droplevel(0)
-        
-    latest_data.index = pd.to_datetime(latest_data.index)
-    latest_data.index.name = 'Date'
-    if 'Adj Close' in latest_data.columns:
-        latest_data = latest_data.drop(columns=['Adj Close'])
     
-    df_combined = pd.concat([df_base, latest_data], ignore_index=True)
+    # Membersihkan data dari Yahoo Finance
+    if not latest_data.empty:
+        latest_data.index.name = 'Date'
+        if 'Adj Close' in latest_data.columns:
+            latest_data = latest_data.drop(columns=['Adj Close'])
+    
+    # Gabungkan data historis dengan data terbaru. JANGAN gunakan ignore_index=True
+    # agar indeks tanggal tetap terjaga.
+    df_combined = pd.concat([df_base, latest_data])
+    
+    # Hapus baris dengan tanggal (indeks) yang duplikat.
+    # 'keep="last"' memastikan kita menggunakan data terbaru dari yfinance jika ada tumpang tindih tanggal.
     df_cleaned = df_combined[~df_combined.index.duplicated(keep='last')]
+    
+    # Pastikan data diurutkan berdasarkan tanggal setelah penggabungan dan pembersihan
     df_cleaned.sort_index(inplace=True)
     
     return df_cleaned
