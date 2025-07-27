@@ -46,8 +46,11 @@ def load_scaler():
 
 @st.cache_data(ttl="15m")
 def load_data():
-    """Memuat data dari CSV, membersihkannya, lalu mengambil data terbaru dari yfinance."""
-    # Bagian 1: Muat dan bersihkan data dasar dari CSV dengan metode yang benar
+    """
+    Memuat data dari CSV, membersihkannya, lalu mengambil data terbaru dari yfinance
+    untuk membuat dataset yang up-to-date.
+    """
+    # Bagian 1: Muat dan bersihkan data dasar dari CSV
     file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
     df_base = pd.read_csv(file_path, index_col=0)
     
@@ -64,6 +67,9 @@ def load_data():
     df_base.dropna(inplace=True)
     df_base.index = pd.to_datetime(df_base.index)
     df_base.index.name = 'Date'
+    
+    # PERBAIKAN: Hapus duplikat dari data dasar terlebih dahulu
+    df_base = df_base[~df_base.index.duplicated(keep='last')]
     
     # Bagian 2: Ambil data terbaru dari yfinance
     latest_data = yf.download("BTC-USD", period="10d", interval="1d")
