@@ -51,35 +51,32 @@ def load_data():
     """Memuat dan membersihkan data historis Bitcoin."""
     file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
     
-    # --- PERBAIKAN DI SINI ---
-    # Gunakan kolom pertama (indeks 0) sebagai Indeks Tanggal.
-    # Ini lebih aman daripada mencari nama kolom 'Date'.
     df_base = pd.read_csv(file_path, index_col=0, parse_dates=True)
-    
-    # Setelah dimuat, kita beri nama indeksnya 'Date' agar konsisten
     df_base.index.name = 'Date'
     
-    # Membersihkan data dari file CSV jika ada nilai non-numerik
     for col in df_base.columns:
         df_base[col] = pd.to_numeric(df_base[col], errors='coerce')
     df_base.dropna(inplace=True)
     
-    # Mengambil data 10 hari terakhir dari Yahoo Finance
     latest_data = yf.download("BTC-USD", period="10d", interval="1d")
     
-    # Membersihkan data dari Yahoo Finance
     if not latest_data.empty:
         latest_data.index.name = 'Date'
         if 'Adj Close' in latest_data.columns:
             latest_data = latest_data.drop(columns=['Adj Close'])
     
-    # Gabungkan data historis dengan data terbaru
     df_combined = pd.concat([df_base, latest_data])
     
-    # Hapus baris dengan tanggal (indeks) yang duplikat
     df_cleaned = df_combined[~df_combined.index.duplicated(keep='last')]
     
-    # Urutkan data berdasarkan tanggal
+    # --- PERBAIKAN DI SINI ---
+    # 1. Paksa konversi seluruh indeks ke datetime. Yang gagal akan menjadi NaT (Not a Time).
+    df_cleaned.index = pd.to_datetime(df_cleaned.index, errors='coerce')
+    
+    # 2. Hapus baris yang indeksnya gagal dikonversi (menjadi NaT).
+    df_cleaned = df_cleaned[df_cleaned.index.notna()]
+    
+    # 3. Sekarang, sort_index() dijamin aman karena semua indeks bertipe datetime.
     df_cleaned.sort_index(inplace=True)
     
     return df_cleaned
