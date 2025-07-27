@@ -17,7 +17,7 @@ st.set_page_config(
 @st.cache_resource
 def load_keras_model():
     """Memuat model LSTM yang sudah dilatih."""
-    model = load_model('models/lstm_model.h5')
+    model = load_model('models/lstm_model.keras')
     return model
 
 @st.cache_resource
