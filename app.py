@@ -49,17 +49,22 @@ def load_scaler():
 @st.cache_data(ttl="15m")
 def load_data():
     """Memuat dan membersihkan data historis Bitcoin."""
-    # Memuat data dasar dari file CSV
     file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
-    # Pastikan kolom pertama ('Date') digunakan sebagai indeks dan langsung di-parse sebagai tanggal
-    df_base = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+    
+    # --- PERBAIKAN DI SINI ---
+    # Gunakan kolom pertama (indeks 0) sebagai Indeks Tanggal.
+    # Ini lebih aman daripada mencari nama kolom 'Date'.
+    df_base = pd.read_csv(file_path, index_col=0, parse_dates=True)
+    
+    # Setelah dimuat, kita beri nama indeksnya 'Date' agar konsisten
+    df_base.index.name = 'Date'
     
     # Membersihkan data dari file CSV jika ada nilai non-numerik
     for col in df_base.columns:
         df_base[col] = pd.to_numeric(df_base[col], errors='coerce')
     df_base.dropna(inplace=True)
     
-    # Mengambil data 10 hari terakhir dari Yahoo Finance untuk memastikan data selalu up-to-date
+    # Mengambil data 10 hari terakhir dari Yahoo Finance
     latest_data = yf.download("BTC-USD", period="10d", interval="1d")
     
     # Membersihkan data dari Yahoo Finance
@@ -68,15 +73,13 @@ def load_data():
         if 'Adj Close' in latest_data.columns:
             latest_data = latest_data.drop(columns=['Adj Close'])
     
-    # Gabungkan data historis dengan data terbaru. JANGAN gunakan ignore_index=True
-    # agar indeks tanggal tetap terjaga.
+    # Gabungkan data historis dengan data terbaru
     df_combined = pd.concat([df_base, latest_data])
     
-    # Hapus baris dengan tanggal (indeks) yang duplikat.
-    # 'keep="last"' memastikan kita menggunakan data terbaru dari yfinance jika ada tumpang tindih tanggal.
+    # Hapus baris dengan tanggal (indeks) yang duplikat
     df_cleaned = df_combined[~df_combined.index.duplicated(keep='last')]
     
-    # Pastikan data diurutkan berdasarkan tanggal setelah penggabungan dan pembersihan
+    # Urutkan data berdasarkan tanggal
     df_cleaned.sort_index(inplace=True)
     
     return df_cleaned
