@@ -1,7 +1,8 @@
 # =================================================================================
-# FINAL APP.PY SCRIPT (Metode Load Weights)
+# FINAL APP.PY SCRIPT (PERBAIKAN DATA LIVE & SEMUA FITUR)
 # =================================================================================
 
+# Import library utama
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -21,7 +22,6 @@ st.set_page_config(
 @st.cache_resource
 def build_and_load_lstm_model():
     """Membangun arsitektur LSTM dan memuat bobot yang sudah dilatih."""
-    # 1. Bangun arsitektur yang sama persis seperti di notebook
     model = Sequential()
     model.add(LSTM(units=50, return_sequences=True, input_shape=(60, 1)))
     model.add(Dropout(0.2))
@@ -29,8 +29,6 @@ def build_and_load_lstm_model():
     model.add(Dropout(0.2))
     model.add(Dense(units=25))
     model.add(Dense(units=1))
-    
-    # 2. Muat HANYA bobotnya
     model.load_weights('models/lstm_model_weights.weights.h5')
     return model
 
@@ -48,35 +46,40 @@ def load_scaler():
 
 @st.cache_data(ttl="15m")
 def load_data():
-    """Memuat dan membersihkan data historis Bitcoin."""
+    """Memuat data dari CSV, membersihkannya, lalu mengambil data terbaru dari yfinance."""
+    # Bagian 1: Muat dan bersihkan data dasar dari CSV dengan metode yang benar
     file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
+    df_base = pd.read_csv(file_path, index_col=0)
     
-    df_base = pd.read_csv(file_path, index_col=0, parse_dates=True)
-    df_base.index.name = 'Date'
-    
+    junk_rows_to_drop = ['Ticker', 'Date']
+    for label in junk_rows_to_drop:
+        try:
+            df_base.drop(label, inplace=True)
+        except KeyError:
+            pass
+            
     for col in df_base.columns:
         df_base[col] = pd.to_numeric(df_base[col], errors='coerce')
+        
     df_base.dropna(inplace=True)
+    df_base.index = pd.to_datetime(df_base.index)
+    df_base.index.name = 'Date'
     
+    # Bagian 2: Ambil data terbaru dari yfinance
     latest_data = yf.download("BTC-USD", period="10d", interval="1d")
     
     if not latest_data.empty:
+        if isinstance(latest_data.columns, pd.MultiIndex):
+            latest_data.columns = latest_data.columns.droplevel(0)
+        
+        latest_data.index = pd.to_datetime(latest_data.index)
         latest_data.index.name = 'Date'
         if 'Adj Close' in latest_data.columns:
             latest_data = latest_data.drop(columns=['Adj Close'])
     
+    # Bagian 3: Gabungkan dan finalisasi
     df_combined = pd.concat([df_base, latest_data])
-    
     df_cleaned = df_combined[~df_combined.index.duplicated(keep='last')]
-    
-    # --- PERBAIKAN DI SINI ---
-    # 1. Paksa konversi seluruh indeks ke datetime. Yang gagal akan menjadi NaT (Not a Time).
-    df_cleaned.index = pd.to_datetime(df_cleaned.index, errors='coerce')
-    
-    # 2. Hapus baris yang indeksnya gagal dikonversi (menjadi NaT).
-    df_cleaned = df_cleaned[df_cleaned.index.notna()]
-    
-    # 3. Sekarang, sort_index() dijamin aman karena semua indeks bertipe datetime.
     df_cleaned.sort_index(inplace=True)
     
     return df_cleaned
@@ -87,31 +90,43 @@ model_rf = load_rf_model()
 scaler = load_scaler()
 df = load_data()
 
-# --- Sisa kode aplikasi (tidak ada perubahan dari sini ke bawah) ---
+# --- Header Aplikasi ---
 st.title('📈 Aplikasi Prediksi Harga Bitcoin')
-st.write("Aplikasi ini membandingkan kinerja model LSTM dan Random Forest...")
-# (Kode UI Anda selanjutnya)
+st.write("""
+Aplikasi ini membandingkan kinerja model LSTM dan Random Forest untuk memprediksi 
+harga penutupan (*Close*) Bitcoin untuk hari berikutnya. Data diperbarui secara otomatis.
+""")
+
+# --- Sidebar ---
 st.sidebar.header('Pengaturan Pengguna')
-model_selection = st.sidebar.selectbox("Pilih Model Prediksi:",("LSTM", "Random Forest"))
+model_selection = st.sidebar.selectbox("Pilih Model Prediksi:", ("LSTM", "Random Forest"))
+
+# --- Tampilan Body ---
 st.header('Visualisasi Data Harga Bitcoin (Live)')
 st.line_chart(df['Close'])
+    
 st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
+
 if st.sidebar.button('Buat Prediksi Harga Besok'):
     last_60_days = df['Close'].values[-60:]
     last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
+    
     if model_selection == "LSTM":
         X_pred = np.array([last_60_days_scaled])
         X_pred = np.reshape(X_pred, (X_pred.shape[0], X_pred.shape[1], 1))
         pred_price_scaled = model_lstm.predict(X_pred)
         predicted_price = scaler.inverse_transform(pred_price_scaled)[0][0]
-    else:
+    else: # Random Forest
         X_pred = np.array([last_60_days_scaled.flatten()])
         pred_price_scaled = model_rf.predict(X_pred)
         predicted_price = scaler.inverse_transform(pred_price_scaled.reshape(-1, 1))[0][0]
+    
     last_price = df['Close'].values[-1]
     price_change = predicted_price - last_price
+    
     st.write(f"Harga Penutupan Terakhir (Live): **${last_price:,.2f}**")
     st.metric(label="Prediksi Harga untuk Besok", value=f"${predicted_price:,.2f}", delta=price_change)
+
     st.subheader(f"Grafik Detail Prediksi ({model_selection}) vs. Data Aktual")
     last_60_days_df = df['Close'][-60:].reset_index()
     next_day_date = last_60_days_df['Date'].iloc[-1] + pd.Timedelta(days=1)
@@ -120,6 +135,7 @@ if st.sidebar.button('Buat Prediksi Harga Besok'):
     st.line_chart(plot_df['Close'])
 else:
     st.info(f'Tekan tombol "Buat Prediksi Harga Besok" di sidebar untuk melihat hasil prediksi dari model {model_selection}.')
+
 with st.expander("Lihat Detail Kinerja Historis Model (Evaluasi pada Data Uji)"):
     lstm_mae = 2904.64
     lstm_rmse = 3687.65
@@ -130,5 +146,6 @@ with st.expander("Lihat Detail Kinerja Historis Model (Evaluasi pada Data Uji)")
 * **MAE (Mean Absolute Error):** Ini adalah **rata-rata kesalahan prediksi** dalam Dolar. Jika MAE adalah $500, artinya secara rata-rata, tebakan model meleset sebesar $500 dari harga sebenarnya.
 * **RMSE (Root Mean Squared Error):** Mirip dengan MAE, namun **memberi "hukuman" yang jauh lebih besar untuk tebakan yang meleset sangat jauh**.
 """)
+
 st.write("---")
 st.write("Skripsi oleh Nama Anda (NIM Anda)")
