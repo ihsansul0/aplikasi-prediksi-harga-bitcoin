@@ -73,7 +73,7 @@ def load_data():
     if 'Adj Close' in latest_data.columns:
         latest_data = latest_data.drop(columns=['Adj Close'])
     
-    df_combined = pd.concat([df_base, latest_data])
+    df_combined = pd.concat([df_base, latest_data], ignore_index=True)
     df_cleaned = df_combined[~df_combined.index.duplicated(keep='last')]
     df_cleaned.sort_index(inplace=True)
     
