@@ -152,4 +152,4 @@ else:
 
     # --- Footer ---
     st.write("---")
-    st.write("Skripsi oleh Nama Anda (NIM Anda)")
+    st.write("Skripsi oleh Ihsan Sulaeman Nuraziz (21110612)")
