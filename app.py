@@ -1,5 +1,5 @@
 # =================================================================================
-# FINAL APP.PY SCRIPT (STABLE & ROBUST VERSION)
+# FINAL APP.PY SCRIPT (STABLE VERSION)
 # =================================================================================
 
 # Import library utama
@@ -49,6 +49,7 @@ def load_data():
     Mencoba memuat data live. Jika gagal, memuat dari file CSV sebagai cadangan.
     """
     try:
+        # Coba muat data terbaru langsung dari yfinance
         data = yf.download("BTC-USD", start="2020-01-01", interval="1d")
         if data.empty:
             raise ValueError("Data dari yfinance kosong, memuat dari file cadangan.")
@@ -59,6 +60,7 @@ def load_data():
     except Exception as e:
         st.warning(f"Gagal mengambil data live: {e}. Mencoba memuat dari file cadangan...")
         try:
+            # Jika gagal, muat dari CSV sebagai cadangan
             file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
             data = pd.read_csv(file_path, index_col='Date', parse_dates=True)
             data.dropna(inplace=True)
@@ -96,7 +98,7 @@ else:
         
         # Pemeriksaan NaN sebelum prediksi
         if np.isnan(last_60_days).any():
-            st.error("Gagal membuat prediksi: Data input mengandung nilai yang tidak valid (NaN). Coba refresh halaman.")
+            st.error("Gagal membuat prediksi: Data input mengandung nilai tidak valid (NaN). Coba refresh halaman.")
         else:
             last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
             
@@ -140,6 +142,7 @@ else:
             st.subheader("Model Random Forest")
             st.metric(label="MAE", value=f"${rf_mae:,.2f}")
             st.metric(label="RMSE", value=f"${rf_rmse:,.2f}")
+            
         st.markdown("""
         ---
         **Penjelasan Metrik:**
@@ -147,5 +150,6 @@ else:
         * **RMSE (Root Mean Squared Error):** Mirip MAE, namun memberi "hukuman" lebih besar untuk tebakan yang meleset sangat jauh.
         """)
 
+    # --- Footer ---
     st.write("---")
     st.write("Skripsi oleh Nama Anda (NIM Anda)")
