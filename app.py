@@ -1,5 +1,5 @@
 # =================================================================================
-# FINAL APP.PY SCRIPT (PERBAIKAN DATA LIVE & SEMUA FITUR)
+# FINAL APP.PY SCRIPT (STABLE VERSION)
 # =================================================================================
 
 # Import library utama
@@ -22,73 +22,52 @@ st.set_page_config(
 @st.cache_resource
 def build_and_load_lstm_model():
     """Membangun arsitektur LSTM dan memuat bobot yang sudah dilatih."""
-    model = Sequential()
-    model.add(LSTM(units=50, return_sequences=True, input_shape=(60, 1)))
-    model.add(Dropout(0.2))
-    model.add(LSTM(units=50, return_sequences=False))
-    model.add(Dropout(0.2))
-    model.add(Dense(units=25))
-    model.add(Dense(units=1))
+    model = Sequential([
+        LSTM(units=50, return_sequences=True, input_shape=(60, 1)),
+        Dropout(0.2),
+        LSTM(units=50, return_sequences=False),
+        Dropout(0.2),
+        Dense(units=25),
+        Dense(units=1)
+    ])
     model.load_weights('models/lstm_model_weights.weights.h5')
     return model
 
 @st.cache_resource
 def load_rf_model():
     """Memuat model Random Forest yang sudah dilatih."""
-    model = joblib.load('models/random_forest_model.pkl')
-    return model
+    return joblib.load('models/random_forest_model.pkl')
 
 @st.cache_resource
 def load_scaler():
     """Memuat scaler yang sudah di-fit."""
-    scaler = joblib.load('models/scaler.pkl')
-    return scaler
+    return joblib.load('models/scaler.pkl')
 
 @st.cache_data(ttl="15m")
 def load_data():
     """
-    Memuat data dari CSV, membersihkannya, lalu mengambil data terbaru dari yfinance
-    untuk membuat dataset yang up-to-date.
+    Mencoba memuat data live. Jika gagal, memuat dari file CSV sebagai cadangan.
     """
-    # Bagian 1: Muat dan bersihkan data dasar dari CSV
-    file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
-    df_base = pd.read_csv(file_path, index_col=0)
-    
-    junk_rows_to_drop = ['Ticker', 'Date']
-    for label in junk_rows_to_drop:
+    try:
+        # Coba muat data terbaru langsung dari yfinance
+        data = yf.download("BTC-USD", start="2020-01-01", interval="1d")
+        if data.empty:
+            raise ValueError("Data dari yfinance kosong.")
+        data.dropna(inplace=True)
+        if 'Adj Close' in data.columns:
+            data = data.drop(columns=['Adj Close'])
+        return data
+    except Exception as e:
+        st.warning(f"Gagal mengambil data live: {e}. Mencoba memuat dari file cadangan...")
         try:
-            df_base.drop(label, inplace=True)
-        except KeyError:
-            pass
-            
-    for col in df_base.columns:
-        df_base[col] = pd.to_numeric(df_base[col], errors='coerce')
-        
-    df_base.dropna(inplace=True)
-    df_base.index = pd.to_datetime(df_base.index)
-    df_base.index.name = 'Date'
-    
-    # PERBAIKAN: Hapus duplikat dari data dasar terlebih dahulu
-    df_base = df_base[~df_base.index.duplicated(keep='last')]
-    
-    # Bagian 2: Ambil data terbaru dari yfinance
-    latest_data = yf.download("BTC-USD", period="10d", interval="1d")
-    
-    if not latest_data.empty:
-        if isinstance(latest_data.columns, pd.MultiIndex):
-            latest_data.columns = latest_data.columns.droplevel(0)
-        
-        latest_data.index = pd.to_datetime(latest_data.index)
-        latest_data.index.name = 'Date'
-        if 'Adj Close' in latest_data.columns:
-            latest_data = latest_data.drop(columns=['Adj Close'])
-    
-    # Bagian 3: Gabungkan dan finalisasi
-    df_combined = pd.concat([df_base, latest_data])
-    df_cleaned = df_combined[~df_combined.index.duplicated(keep='last')]
-    df_cleaned.sort_index(inplace=True)
-    
-    return df_cleaned
+            # Jika gagal, muat dari CSV sebagai cadangan
+            file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
+            data = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+            data.dropna(inplace=True)
+            return data
+        except Exception as e2:
+            st.error(f"Gagal memuat data dari file cadangan: {e2}")
+            return pd.DataFrame()
 
 # Memuat semua aset
 model_lstm = build_and_load_lstm_model()
@@ -98,60 +77,74 @@ df = load_data()
 
 # --- Header Aplikasi ---
 st.title('📈 Aplikasi Prediksi Harga Bitcoin')
-st.write("""
-Aplikasi ini membandingkan kinerja model LSTM dan Random Forest untuk memprediksi 
-harga penutupan (*Close*) Bitcoin untuk hari berikutnya. Data diperbarui secara otomatis.
-""")
+st.write("Aplikasi ini membandingkan kinerja model LSTM dan Random Forest untuk memprediksi harga Bitcoin.")
 
-# --- Sidebar ---
-st.sidebar.header('Pengaturan Pengguna')
-model_selection = st.sidebar.selectbox("Pilih Model Prediksi:", ("LSTM", "Random Forest"))
-
-# --- Tampilan Body ---
-st.header('Visualisasi Data Harga Bitcoin (Live)')
-st.line_chart(df['Close'])
-    
-st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
-
-if st.sidebar.button('Buat Prediksi Harga Besok'):
-    last_60_days = df['Close'].values[-60:]
-    last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
-    
-    if model_selection == "LSTM":
-        X_pred = np.array([last_60_days_scaled])
-        X_pred = np.reshape(X_pred, (X_pred.shape[0], X_pred.shape[1], 1))
-        pred_price_scaled = model_lstm.predict(X_pred)
-        predicted_price = scaler.inverse_transform(pred_price_scaled)[0][0]
-    else: # Random Forest
-        X_pred = np.array([last_60_days_scaled.flatten()])
-        pred_price_scaled = model_rf.predict(X_pred)
-        predicted_price = scaler.inverse_transform(pred_price_scaled.reshape(-1, 1))[0][0]
-    
-    last_price = df['Close'].values[-1]
-    price_change = predicted_price - last_price
-    
-    st.write(f"Harga Penutupan Terakhir (Live): **${last_price:,.2f}**")
-    st.metric(label="Prediksi Harga untuk Besok", value=f"${predicted_price:,.2f}", delta=price_change)
-
-    st.subheader(f"Grafik Detail Prediksi ({model_selection}) vs. Data Aktual")
-    last_60_days_df = df['Close'][-60:].reset_index()
-    next_day_date = last_60_days_df['Date'].iloc[-1] + pd.Timedelta(days=1)
-    prediction_df = pd.DataFrame({'Date': [next_day_date], 'Close': [predicted_price]})
-    plot_df = pd.concat([last_60_days_df, prediction_df]).set_index('Date')
-    st.line_chart(plot_df['Close'])
+# --- Aplikasi Utama ---
+if df.empty:
+    st.error("Gagal memuat data. Periksa koneksi internet Anda dan refresh halaman.")
 else:
-    st.info(f'Tekan tombol "Buat Prediksi Harga Besok" di sidebar untuk melihat hasil prediksi dari model {model_selection}.')
+    # --- Sidebar ---
+    st.sidebar.header('Pengaturan')
+    model_selection = st.sidebar.selectbox("Pilih Model:", ("LSTM", "Random Forest"))
+    
+    # --- Tampilan Body ---
+    st.header('Data Harga Bitcoin (Live)')
+    st.line_chart(df['Close'])
+    
+    st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
+    
+    if st.sidebar.button('Buat Prediksi'):
+        last_60_days = df['Close'].values[-60:]
+        last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
+        
+        if model_selection == "LSTM":
+            X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
+            pred_price_scaled = model_lstm.predict(X_pred)
+        else: # Random Forest
+            X_pred = last_60_days_scaled.flatten().reshape(1, -1)
+            pred_price_scaled = model_rf.predict(X_pred)
 
-with st.expander("Lihat Detail Kinerja Historis Model (Evaluasi pada Data Uji)"):
-    lstm_mae = 2904.64
-    lstm_rmse = 3687.65
-    rf_mae = 17263.62
-    rf_rmse = 22732.06
-    st.markdown("""---
-**Penjelasan Metrik:**
-* **MAE (Mean Absolute Error):** Ini adalah **rata-rata kesalahan prediksi** dalam Dolar. Jika MAE adalah $500, artinya secara rata-rata, tebakan model meleset sebesar $500 dari harga sebenarnya.
-* **RMSE (Root Mean Squared Error):** Mirip dengan MAE, namun **memberi "hukuman" yang jauh lebih besar untuk tebakan yang meleset sangat jauh**.
-""")
+        predicted_price = scaler.inverse_transform(pred_price_scaled.reshape(-1, 1))[0][0]
+        last_price = df['Close'].iloc[-1]
+        price_change = predicted_price - last_price
+        
+        st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=f"{price_change:,.2f}")
+        
+        st.subheader(f"Grafik Detail Prediksi ({model_selection})")
+        last_60_days_df = df['Close'][-60:].reset_index()
+        next_day_date = last_60_days_df['Date'].iloc[-1] + pd.Timedelta(days=1)
+        prediction_df = pd.DataFrame({'Date': [next_day_date], 'Close': [predicted_price]})
+        plot_df = pd.concat([last_60_days_df, prediction_df]).set_index('Date')
+        st.line_chart(plot_df['Close'])
+    else:
+        st.info(f'Tekan tombol "Buat Prediksi" di sidebar untuk melihat hasil dari model {model_selection}.')
 
-st.write("---")
-st.write("Skripsi oleh Nama Anda (NIM Anda)")
+    with st.expander("Lihat Detail Kinerja Historis Model"):
+        lstm_mae = 2904.64
+        lstm_rmse = 3687.65
+        rf_mae = 17263.62
+        rf_rmse = 22732.06
+        
+        st.markdown("""
+        Metrik berikut dihitung dari performa model saat diuji menggunakan data historis yang belum pernah dilihat sebelumnya.
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Model LSTM")
+            st.metric(label="MAE", value=f"${lstm_mae:,.2f}")
+            st.metric(label="RMSE", value=f"${lstm_rmse:,.2f}")
+        with col2:
+            st.subheader("Model Random Forest")
+            st.metric(label="MAE", value=f"${rf_mae:,.2f}")
+            st.metric(label="RMSE", value=f"${rf_rmse:,.2f}")
+            
+        st.markdown("""
+        ---
+        **Penjelasan Metrik:**
+        * **MAE (Mean Absolute Error):** Rata-rata kesalahan prediksi dalam Dolar.
+        * **RMSE (Root Mean Squared Error):** Mirip MAE, namun memberi "hukuman" lebih besar untuk tebakan yang meleset sangat jauh.
+        """)
+
+    st.write("---")
+    st.write("Skripsi oleh Nama Anda (NIM Anda)")
