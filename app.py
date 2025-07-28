@@ -27,41 +27,25 @@ def build_and_load_lstm_model():
 def load_rf_model():
     return joblib.load('models/random_forest_model.pkl')
 
-# FUNGSI LOAD DATA YANG PALING STABIL
 @st.cache_data(ttl="15m")
-def load_data():
+def load_live_data():
     try:
-        df = yf.download("BTC-USD", start="2020-01-01", interval="1d")
-        if df.empty:
+        data = yf.download("BTC-USD", start="2020-01-01", interval="1d")
+        if data.empty:
             raise ValueError("Data dari yfinance kosong.")
-
-        # === BAGIAN PEMBERSIHAN TOTAL ===
-        df.reset_index(inplace=True)
-        df.drop_duplicates(subset='Date', keep='last', inplace=True)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df.dropna(subset=['Date'], inplace=True)
-        df.set_index('Date', inplace=True)
-        df.sort_index(inplace=True)
-
-        numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        df.dropna(inplace=True)
-        if 'Adj Close' in df.columns:
-            df = df.drop(columns=['Adj Close'])
-            
-        return df
+        data.dropna(inplace=True)
+        if 'Adj Close' in data.columns:
+            data = data.drop(columns=['Adj Close'])
+        return data
     except Exception as e:
-        st.error(f"Terjadi kesalahan fatal saat memuat data: {e}")
+        st.error(f"Gagal mengambil data dari yfinance: {e}")
         return pd.DataFrame()
 
 # Memuat model
 model_lstm = build_and_load_lstm_model()
 model_rf = load_rf_model()
 # Mengambil data live
-df = load_data()
+df = load_live_data()
 
 st.title('📈 Aplikasi Prediksi Harga Bitcoin')
 st.write("Aplikasi ini membandingkan kinerja model untuk memprediksi harga Bitcoin.")
@@ -80,30 +64,29 @@ else:
     # MEMBUAT SCALER BARU SECARA LIVE
     data_close = df[['Close']]
     scaler = MinMaxScaler(feature_range=(0, 1))
-    scaler.fit(data_close) # Latih scaler pada keseluruhan data yang ada
+    # Latih scaler pada keseluruhan data yang ada saat ini
+    scaled_data = scaler.fit_transform(data_close)
     
     if st.sidebar.button('Buat Prediksi'):
         last_60_days = data_close.values[-60:]
+        last_60_days_scaled = scaler.transform(last_60_days)
         
-        if np.isnan(last_60_days).any():
-            st.error("Gagal membuat prediksi: Data input mengandung nilai tidak valid (NaN). Coba refresh halaman.")
+        if model_selection == "LSTM":
+            X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
+            pred_price_scaled = model_lstm.predict(X_pred)
         else:
-            last_60_days_scaled = scaler.transform(last_60_days)
-            
-            if model_selection == "LSTM":
-                X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
-                pred_price_scaled = model_lstm.predict(X_pred)
-            else:
-                X_pred = last_60_days_scaled.flatten().reshape(1, -1)
-                pred_price_scaled = model_rf.predict(X_pred)
+            X_pred = last_60_days_scaled.flatten().reshape(1, -1)
+            pred_price_scaled = model_rf.predict(X_pred)
 
-            predicted_price = scaler.inverse_transform(pred_price_scaled)[0][0]
-            last_price = df['Close'].iloc[-1]
-            price_change = predicted_price - last_price
-            
-            st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=price_change)
+        predicted_price = scaler.inverse_transform(pred_price_scaled)[0][0]
+        last_price = df['Close'].iloc[-1]
+        price_change = predicted_price - last_price
+        
+        st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=price_change)
+
     else:
         st.info(f'Tekan tombol "Buat Prediksi" untuk melihat hasilnya.')
 
+    # Footer tidak berubah
     st.write("---")
     st.write("Skripsi oleh Nama Anda (NIM Anda)")
