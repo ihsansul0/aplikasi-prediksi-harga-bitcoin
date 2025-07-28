@@ -1,5 +1,5 @@
 # =================================================================================
-# FINAL APP.PY SCRIPT (STABLE VERSION)
+# FINAL APP.PY SCRIPT (STABLE & ROBUST VERSION)
 # =================================================================================
 
 # Import library utama
@@ -49,10 +49,9 @@ def load_data():
     Mencoba memuat data live. Jika gagal, memuat dari file CSV sebagai cadangan.
     """
     try:
-        # Coba muat data terbaru langsung dari yfinance
         data = yf.download("BTC-USD", start="2020-01-01", interval="1d")
         if data.empty:
-            raise ValueError("Data dari yfinance kosong.")
+            raise ValueError("Data dari yfinance kosong, memuat dari file cadangan.")
         data.dropna(inplace=True)
         if 'Adj Close' in data.columns:
             data = data.drop(columns=['Adj Close'])
@@ -60,7 +59,6 @@ def load_data():
     except Exception as e:
         st.warning(f"Gagal mengambil data live: {e}. Mencoba memuat dari file cadangan...")
         try:
-            # Jika gagal, muat dari CSV sebagai cadangan
             file_path = 'data/BTC-USD_2020-01-01_to_2025-07-01.csv'
             data = pd.read_csv(file_path, index_col='Date', parse_dates=True)
             data.dropna(inplace=True)
@@ -80,8 +78,8 @@ st.title('📈 Aplikasi Prediksi Harga Bitcoin')
 st.write("Aplikasi ini membandingkan kinerja model LSTM dan Random Forest untuk memprediksi harga Bitcoin.")
 
 # --- Aplikasi Utama ---
-if df.empty:
-    st.error("Gagal memuat data. Periksa koneksi internet Anda dan refresh halaman.")
+if df.empty or len(df) < 60:
+    st.error("Gagal memuat data yang cukup untuk prediksi. Periksa koneksi internet Anda dan refresh halaman.")
 else:
     # --- Sidebar ---
     st.sidebar.header('Pengaturan')
@@ -92,31 +90,36 @@ else:
     st.line_chart(df['Close'])
     
     st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
-
+    
     if st.sidebar.button('Buat Prediksi'):
         last_60_days = df['Close'].values[-60:]
-        last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
         
-        if model_selection == "LSTM":
-            X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
-            pred_price_scaled = model_lstm.predict(X_pred)
-        else: # Random Forest
-            X_pred = last_60_days_scaled.flatten().reshape(1, -1)
-            pred_price_scaled = model_rf.predict(X_pred)
+        # Pemeriksaan NaN sebelum prediksi
+        if np.isnan(last_60_days).any():
+            st.error("Gagal membuat prediksi: Data input mengandung nilai yang tidak valid (NaN). Coba refresh halaman.")
+        else:
+            last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
+            
+            if model_selection == "LSTM":
+                X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
+                pred_price_scaled = model_lstm.predict(X_pred)
+            else: # Random Forest
+                X_pred = last_60_days_scaled.flatten().reshape(1, -1)
+                pred_price_scaled = model_rf.predict(X_pred)
 
-        predicted_price = scaler.inverse_transform(pred_price_scaled.reshape(-1, 1))[0][0]
-        last_price = df['Close'].iloc[-1]
-        price_change = predicted_price - last_price
-        
-        # PERBAIKAN ADA DI BARIS 'delta' DI BAWAH INI
-        st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=price_change)
-        
-        st.subheader(f"Grafik Detail Prediksi ({model_selection})")
-        last_60_days_df = df['Close'][-60:].reset_index()
-        next_day_date = last_60_days_df['Date'].iloc[-1] + pd.Timedelta(days=1)
-        prediction_df = pd.DataFrame({'Date': [next_day_date], 'Close': [predicted_price]})
-        plot_df = pd.concat([last_60_days_df, prediction_df]).set_index('Date')
-        st.line_chart(plot_df['Close'])
+            predicted_price = scaler.inverse_transform(pred_price_scaled.reshape(-1, 1))[0][0]
+            last_price = df['Close'].iloc[-1]
+            price_change = predicted_price - last_price
+            
+            st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=price_change)
+            
+            st.subheader(f"Grafik Detail Prediksi ({model_selection})")
+            last_60_days_df = df['Close'][-60:].reset_index()
+            last_60_days_df.rename(columns={'index': 'Date'}, inplace=True)
+            next_day_date = last_60_days_df['Date'].iloc[-1] + pd.Timedelta(days=1)
+            prediction_df = pd.DataFrame({'Date': [next_day_date], 'Close': [predicted_price]})
+            plot_df = pd.concat([last_60_days_df, prediction_df]).set_index('Date')
+            st.line_chart(plot_df['Close'])
     else:
         st.info(f'Tekan tombol "Buat Prediksi" di sidebar untuk melihat hasil dari model {model_selection}.')
 
@@ -125,11 +128,9 @@ else:
         lstm_rmse = 3687.65
         rf_mae = 17263.62
         rf_rmse = 22732.06
-        
         st.markdown("""
         Metrik berikut dihitung dari performa model saat diuji menggunakan data historis yang belum pernah dilihat sebelumnya.
         """)
-        
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Model LSTM")
@@ -139,7 +140,6 @@ else:
             st.subheader("Model Random Forest")
             st.metric(label="MAE", value=f"${rf_mae:,.2f}")
             st.metric(label="RMSE", value=f"${rf_rmse:,.2f}")
-            
         st.markdown("""
         ---
         **Penjelasan Metrik:**
