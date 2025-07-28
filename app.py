@@ -9,10 +9,10 @@ import yfinance as yf
 
 st.set_page_config(page_title="Prediksi Harga Bitcoin", page_icon="₿", layout="wide")
 
-# --- Fungsi HANYA untuk memuat model (lebih sederhana) ---
+# HANYA MEMUAT MODEL, KARENA SCALER DAN DATA AKAN DIBUAT SECARA LIVE
 @st.cache_resource
-def load_model_files():
-    lstm_model = Sequential([
+def build_and_load_lstm_model():
+    model = Sequential([
         LSTM(units=50, return_sequences=True, input_shape=(60, 1)),
         Dropout(0.2),
         LSTM(units=50, return_sequences=False),
@@ -20,28 +20,55 @@ def load_model_files():
         Dense(units=25),
         Dense(units=1)
     ])
-    lstm_model.load_weights('models/lstm_model_weights.weights.h5')
-    rf_model = joblib.load('models/random_forest_model.pkl')
-    return lstm_model, rf_model
+    model.load_weights('models/lstm_model_weights.weights.h5')
+    return model
 
-# --- Memuat data secara langsung di skrip utama ---
-try:
-    df = yf.download("BTC-USD", start="2020-01-01", interval="1d")
-    df.dropna(inplace=True)
-    if 'Adj Close' in df.columns:
-        df = df.drop(columns=['Adj Close'])
-except Exception as e:
-    df = pd.DataFrame() # Jika gagal, buat DataFrame kosong
+@st.cache_resource
+def load_rf_model():
+    return joblib.load('models/random_forest_model.pkl')
 
-# --- Aplikasi Utama ---
+# FUNGSI LOAD DATA YANG PALING STABIL
+@st.cache_data(ttl="15m")
+def load_data():
+    try:
+        df = yf.download("BTC-USD", start="2020-01-01", interval="1d")
+        if df.empty:
+            raise ValueError("Data dari yfinance kosong.")
+
+        # === BAGIAN PEMBERSIHAN TOTAL ===
+        df.reset_index(inplace=True)
+        df.drop_duplicates(subset='Date', keep='last', inplace=True)
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df.dropna(subset=['Date'], inplace=True)
+        df.set_index('Date', inplace=True)
+        df.sort_index(inplace=True)
+
+        numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df.dropna(inplace=True)
+        if 'Adj Close' in df.columns:
+            df = df.drop(columns=['Adj Close'])
+            
+        return df
+    except Exception as e:
+        st.error(f"Terjadi kesalahan fatal saat memuat data: {e}")
+        return pd.DataFrame()
+
+# Memuat model
+model_lstm = build_and_load_lstm_model()
+model_rf = load_rf_model()
+# Mengambil data live
+df = load_data()
+
 st.title('📈 Aplikasi Prediksi Harga Bitcoin')
 st.write("Aplikasi ini membandingkan kinerja model untuk memprediksi harga Bitcoin.")
 
 if df.empty or len(df) < 60:
-    st.error("Gagal memuat data dari yfinance. Periksa koneksi internet Anda dan refresh halaman.")
+    st.error("Gagal memuat data yang cukup untuk prediksi. Periksa koneksi internet Anda dan refresh halaman.")
 else:
-    model_lstm, model_rf = load_model_files()
-
     st.sidebar.header('Pengaturan')
     model_selection = st.sidebar.selectbox("Pilih Model:", ("LSTM", "Random Forest"))
     
@@ -50,23 +77,23 @@ else:
     
     st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
 
-    # Membuat dan melatih scaler secara live
+    # MEMBUAT SCALER BARU SECARA LIVE
     data_close = df[['Close']]
     scaler = MinMaxScaler(feature_range=(0, 1))
-    scaler.fit(data_close)
+    scaler.fit(data_close) # Latih scaler pada keseluruhan data yang ada
     
     if st.sidebar.button('Buat Prediksi'):
-        last_60_days = data_close.iloc[-60:].values
+        last_60_days = data_close.values[-60:]
         
         if np.isnan(last_60_days).any():
-            st.error("Data input mengandung nilai tidak valid (NaN).")
+            st.error("Gagal membuat prediksi: Data input mengandung nilai tidak valid (NaN). Coba refresh halaman.")
         else:
             last_60_days_scaled = scaler.transform(last_60_days)
             
             if model_selection == "LSTM":
                 X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
                 pred_price_scaled = model_lstm.predict(X_pred)
-            else: 
+            else:
                 X_pred = last_60_days_scaled.flatten().reshape(1, -1)
                 pred_price_scaled = model_rf.predict(X_pred)
 
