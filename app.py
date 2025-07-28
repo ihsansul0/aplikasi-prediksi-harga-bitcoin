@@ -92,7 +92,7 @@ else:
     st.line_chart(df['Close'])
     
     st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
-    
+
     if st.sidebar.button('Buat Prediksi'):
         last_60_days = df['Close'].values[-60:]
         last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
@@ -108,7 +108,8 @@ else:
         last_price = df['Close'].iloc[-1]
         price_change = predicted_price - last_price
         
-        st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=f"{price_change:,.2f}")
+        # PERBAIKAN ADA DI BARIS 'delta' DI BAWAH INI
+        st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=price_change)
         
         st.subheader(f"Grafik Detail Prediksi ({model_selection})")
         last_60_days_df = df['Close'][-60:].reset_index()
