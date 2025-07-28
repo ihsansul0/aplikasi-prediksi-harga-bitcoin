@@ -1,5 +1,5 @@
 # =================================================================================
-# FINAL APP.PY SCRIPT (VERSI DEBUG MENDALAM)
+# FINAL APP.PY SCRIPT (VERSI FINAL & STABIL)
 # =================================================================================
 
 import streamlit as st
@@ -73,45 +73,63 @@ else:
     st.header(f'Hasil Prediksi Menggunakan Model {model_selection}')
     
     if st.sidebar.button('Buat Prediksi'):
-        st.subheader("--- PROSES DEBUG PREDIKSI ---")
-        try:
-            # 1. Mengambil data input
-            last_60_days = df['Close'].values[-60:]
-            st.write("1. Data 60 hari terakhir (last_60_days):")
-            st.dataframe(pd.DataFrame(last_60_days, columns=['Close']))
-            st.info(f"Apakah ada NaN di input? -> {np.isnan(last_60_days).any()}")
-
-            # 2. Scaling data
+        last_60_days = df['Close'].values[-60:]
+        
+        if np.isnan(last_60_days).any():
+            st.error("Gagal membuat prediksi: Data input mengandung nilai tidak valid (NaN). Coba refresh halaman.")
+        else:
             last_60_days_scaled = scaler.transform(last_60_days.reshape(-1, 1))
-            st.write("2. Data setelah di-scale:")
-            st.dataframe(pd.DataFrame(last_60_days_scaled, columns=['Scaled Close']))
-
-            # 3. Prediksi
+            
             if model_selection == "LSTM":
                 X_pred = np.reshape(last_60_days_scaled, (1, 60, 1))
                 pred_price_scaled = model_lstm.predict(X_pred)
-            else:
+            else: 
                 X_pred = last_60_days_scaled.flatten().reshape(1, -1)
                 pred_price_scaled = model_rf.predict(X_pred)
-            st.write("3. Hasil prediksi (scaled):", pred_price_scaled)
 
-            # 4. Inverse transform
             predicted_price = scaler.inverse_transform(pred_price_scaled.reshape(-1, 1))[0][0]
-            st.write("4. Hasil prediksi (USD):", predicted_price)
-
-            # 5. Mengambil harga terakhir
-            last_price = df['Close'].iloc[-1]
-            st.write("5. Harga terakhir (USD):", last_price)
-
-            # 6. Menghitung perubahan
-            price_change = predicted_price - last_price
-            st.write("6. Perubahan harga (USD):", price_change)
             
-            st.success("--- DEBUG SELESAI, MENCOBA MENAMPILKAN METRIK ---")
+            # --- PERBAIKAN FINAL ADA DI BARIS INI ---
+            last_price = df['Close'].values[-1]
+            
+            price_change = predicted_price - last_price
+            
             st.metric(label="Prediksi Harga Besok", value=f"${predicted_price:,.2f}", delta=price_change)
             
-        except Exception as e:
-            st.error("Terjadi error di dalam blok prediksi:")
-            st.exception(e)
+            st.subheader(f"Grafik Detail Prediksi ({model_selection})")
+            last_60_days_df = df['Close'][-60:].reset_index()
+            last_60_days_df.rename(columns={'index': 'Date'}, inplace=True)
+            next_day_date = last_60_days_df['Date'].iloc[-1] + pd.Timedelta(days=1)
+            prediction_df = pd.DataFrame({'Date': [next_day_date], 'Close': [predicted_price]})
+            plot_df = pd.concat([last_60_days_df, prediction_df]).set_index('Date')
+            st.line_chart(plot_df['Close'])
     else:
-        st.info(f'Tekan tombol "Buat Prediksi" untuk melihat hasilnya.')
+        st.info(f'Tekan tombol "Buat Prediksi" di sidebar untuk melihat hasil dari model {model_selection}.')
+
+    with st.expander("Lihat Detail Kinerja Historis Model"):
+        lstm_mae = 2904.64
+        lstm_rmse = 3687.65
+        rf_mae = 17263.62
+        rf_rmse = 22732.06
+        st.markdown("""
+        Metrik berikut dihitung dari performa model saat diuji menggunakan data historis yang belum pernah dilihat sebelumnya.
+        """)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Model LSTM")
+            st.metric(label="MAE", value=f"${lstm_mae:,.2f}")
+            st.metric(label="RMSE", value=f"${lstm_rmse:,.2f}")
+        with col2:
+            st.subheader("Model Random Forest")
+            st.metric(label="MAE", value=f"${rf_mae:,.2f}")
+            st.metric(label="RMSE", value=f"${rf_rmse:,.2f}")
+            
+        st.markdown("""
+        ---
+        **Penjelasan Metrik:**
+        * **MAE (Mean Absolute Error):** Rata-rata kesalahan prediksi dalam Dolar.
+        * **RMSE (Root Mean Squared Error):** Mirip MAE, namun memberi "hukuman" lebih besar untuk tebakan yang meleset sangat jauh.
+        """)
+
+    st.write("---")
+    st.write("Skripsi oleh Nama Anda (NIM Anda)")
